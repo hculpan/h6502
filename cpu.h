@@ -26,6 +26,7 @@ struct cpu_status
 	maddress pc;	
 	byte flags;
 	byte lastop;
+	unsigned long totalcycles;
 };
 
 #define WORD_LOHI(lo, hi) (maddress)((hi << 8) + lo)

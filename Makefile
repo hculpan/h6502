@@ -13,4 +13,5 @@ h6502: h6502_main.o cpu.o
 clean:
 	$(RM) -f *.o
 	$(RM) -f h6502.exe
+	$(RM) -f h6502
 

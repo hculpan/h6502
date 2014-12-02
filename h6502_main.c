@@ -5,7 +5,7 @@
 #include "cpu.h"
 
 void before_current_op(struct cpu_status *cpustatus) {
-	printf("-after--------------------------\n");
+	printf("-start--------------------------\n");
 	printf("| a=%02x        x=%02x        y=%02x |\n", cpustatus->a, cpustatus->x, cpustatus->y);
 	printf("| pc=%04x     s=%02x             |\n", cpustatus->pc, cpustatus->s);
 
@@ -17,12 +17,12 @@ void before_current_op(struct cpu_status *cpustatus) {
 		test = test << 1;
 	}
 
-	printf("| flags=%s                 |\n", b);
+	printf("| flags=%s               |\n", b);
 	printf("--------------------------------\n");
 }
 
 void after_current_op(struct cpu_status *cpustatus) {
-	printf("-after--------------------------\n");
+	printf("--------------------------------\n");
 	printf("| a=%02x        x=%02x        y=%02x |\n", cpustatus->a, cpustatus->x, cpustatus->y);
 	printf("| pc=%04x     s=%02x             |\n", cpustatus->pc, cpustatus->s);
 
@@ -34,7 +34,7 @@ void after_current_op(struct cpu_status *cpustatus) {
 		test = test << 1;
 	}
 
-	printf("| flags=%s                 |\n", b);
+	printf("| flags=%s  cycles=%05lu |\n", b, cpustatus->totalcycles);
 	printf("| lastop=%02x  (%s)             |\n", cpustatus->lastop, inst_mneumonics[cpustatus->lastop]);
 	printf("--------------------------------\n");
 }
