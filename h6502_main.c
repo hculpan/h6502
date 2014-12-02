@@ -15,7 +15,6 @@ void before_current_op(struct cpu_status *cpustatus) {
 	for (int i = 7; i >= 0; i--) {
 		b[i] = (cpustatus->flags & test ? '1': '0');
 		test = test << 1;
-//		printf("flags=%d test=%d", cpustatus->flags, test);
 	}
 
 	printf("| flags=%s                 |\n", b);
@@ -33,7 +32,6 @@ void after_current_op(struct cpu_status *cpustatus) {
 	for (int i = 7; i >= 0; i--) {
 		b[i] = (cpustatus->flags & test ? '1': '0');
 		test = test << 1;
-//		printf("flags=%d test=%d", cpustatus->flags, test);
 	}
 
 	printf("| flags=%s                 |\n", b);
