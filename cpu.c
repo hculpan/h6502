@@ -1,5 +1,7 @@
 #include "cpu.h"
 
+#include <stdio.h>
+
 int romSize;
 int ramSize;
 
@@ -24,6 +26,8 @@ byte cpu_running = FALSE;
 
 byte lastop = 0;
 
+byte lastcycles = 0;
+
 unsigned long totalcycles = 0;
 
 byte * init_memory(int size) {
@@ -34,21 +38,46 @@ byte * init_memory(int size) {
 	return result;
 }
 
+byte load_bin() {
+	printf("Attempting to find rom.bin\n");
+	byte result = FALSE;
+	FILE *file = fopen("rom.bin", "rb");
+	if (!file) {
+		file = fopen("test/rom.bin", "rb");
+	}
+
+	if (file) {
+		printf("Reading from rom.bin\n");
+		fseek(file, 0, SEEK_END);  
+		long sz = ftell(file);  
+		rewind(file);           
+		fread(rom, sz, 1, file);
+		fclose(file);
+		result = TRUE;
+	}
+
+	return result;
+}
+
 void load_rom() {
 	set_memory(0xfffc, LOBYTE(romStart));
 	set_memory(0xfffd, HIBYTE(romStart));
 
-	set_memory(romStart    , 0xa9);  // LDA #ef
-	set_memory(romStart + 1, 0xef);
-	set_memory(romStart + 2, 0x85);  // STA $10
-	set_memory(romStart + 3, 0x10);
-	set_memory(romStart + 4, 0xa6);  // LDX $10
-	set_memory(romStart + 5, 0x10);
+	if (!load_bin()) {
+		printf("No rom.bin found; loading default\n");
+		set_memory(romStart    , 0xa9);  // LDA #ef
+		set_memory(romStart + 1, 0xef);
+		set_memory(romStart + 2, 0x85);  // STA $10
+		set_memory(romStart + 3, 0x10);
+		set_memory(romStart + 4, 0xa6);  // LDX $10
+		set_memory(romStart + 5, 0x10);
+	}
 
 	lock_rom();
 }
 
 void init_cpu(int RomSize, int RamSize) {
+	sp_reg = 0xff;
 	romSize = RomSize;
 	rom = init_memory(romSize);
 	ramSize = RamSize;
@@ -56,6 +85,7 @@ void init_cpu(int RomSize, int RamSize) {
 	romStart = 65536 - romSize;
 	totalcycles = 0;
 	load_rom();
+	pc_reg = WORD_LOHI(get_memory(RESET_VECTOR), get_memory(RESET_VECTOR + 1));
 }
 
 void get_cpu_status(struct cpu_status *cpustatus) {
@@ -66,6 +96,7 @@ void get_cpu_status(struct cpu_status *cpustatus) {
 	cpustatus->pc = pc_reg;
 	cpustatus->flags = flags_reg;
 	cpustatus->lastop = lastop;
+	cpustatus->lastcycles = lastcycles;
 	cpustatus->totalcycles = totalcycles;
 }
 
@@ -144,6 +175,10 @@ maddress get_zero_page_y_arg() {
 	return get_zero_page_arg() + y_reg;
 }
 
+signed char get_relative() {
+	return get_memory(pc_reg + 1);
+}
+
 int excute_instruction() {
 	byte cycles = 0;
 	lastop = get_memory(pc_reg);
@@ -201,7 +236,7 @@ int excute_instruction() {
 			cycles = 3;
 			break;
 		case 0x95: // STA zero page,x
-			memarg = get_absolute_x_arg();
+			memarg = get_zero_page_x_arg();
 			set_memory(memarg, accum_reg);
 			pc_reg += 2;
 			cycles = 4;
@@ -216,6 +251,74 @@ int excute_instruction() {
 			pc_reg = get_absolute_arg();
 			cycles = 3;
 			break;
+		case 0xe8: // INX impl
+			x_reg++;
+			update_zero_and_negative_flags(x_reg);
+			pc_reg++;
+			cycles = 2;
+			break;
+		case 0xc8: // INY impl
+			y_reg++;
+			update_zero_and_negative_flags(y_reg);
+			pc_reg++;
+			cycles = 2;
+			break;
+		case 0xca: // DEX impl
+			x_reg--;
+			update_zero_and_negative_flags(x_reg);
+			pc_reg++;
+			cycles = 2;
+			break;
+		case 0x88: // DEY impl
+			y_reg--;
+			update_zero_and_negative_flags(y_reg);
+			pc_reg++;
+			cycles = 2;
+			break;
+		case 0xf0: //BEQ relative
+			if (get_zero_flag()) {
+				signed char diff = get_relative();
+				byte currpage = pc_reg >> 8;
+				pc_reg += diff + 2;
+				cycles = 3 + ( currpage != pc_reg >> 8 ? 1 : 0);
+			} else {
+				pc_reg += 2;
+				cycles = 2;
+			}
+			break;
+		case 0xd0: //BNE relative
+			if (!get_zero_flag()) {
+				signed char diff = get_relative();
+				byte currpage = pc_reg >> 8;
+				pc_reg += diff + 2;
+				cycles = 3 + ( currpage != pc_reg >> 8 ? 1 : 0);
+			} else {
+				pc_reg += 2;
+				cycles = 2;
+			}
+			break;
+		case 0x10: //BPL relative
+			if (!get_negative_flag()) {
+				signed char diff = get_relative();
+				byte currpage = pc_reg >> 8;
+				pc_reg += diff + 2;
+				cycles = 3 + ( currpage != pc_reg >> 8 ? 1 : 0);
+			} else {
+				pc_reg += 2;
+				cycles = 2;
+			}
+			break;
+		case 0x30: //BPMI relative
+			if (get_negative_flag()) {
+				signed char diff = get_relative();
+				byte currpage = pc_reg >> 8;
+				pc_reg += diff + 2;
+				cycles = 3 + ( currpage != pc_reg >> 8 ? 1 : 0);
+			} else {
+				pc_reg += 2;
+				cycles = 2;
+			}
+			break;
 		default:
 			pc_reg += 1;
 			cpu_running = FALSE;
@@ -225,24 +328,27 @@ int excute_instruction() {
 	return cycles;
 }
 
+void step(void (*before)(struct cpu_status *), void (*after)(struct cpu_status *), struct cpu_status *cpustatus) {
+	if (before) {
+		get_cpu_status(cpustatus);
+		before(cpustatus);
+	}
+
+	lastcycles = excute_instruction();
+	totalcycles += lastcycles;
+
+	if (after) {
+		get_cpu_status(cpustatus);
+		after(cpustatus);
+	}
+}
+
 void start_cpu(void (*before)(struct cpu_status *), void (*after)(struct cpu_status *), struct cpu_status *cpustatus) {
 	totalcycles = 0;
 	cpu_running = TRUE;
 
-	pc_reg = WORD_LOHI(get_memory(RESET_VECTOR), get_memory(RESET_VECTOR + 1));
-
 	while (cpu_running) {
-		if (before) {
-			get_cpu_status(cpustatus);
-			before(cpustatus);
-		}
-
-		totalcycles += excute_instruction();
-
-		if (after) {
-			get_cpu_status(cpustatus);
-			after(cpustatus);
-		}
+		step(before, after, cpustatus);
 	}
 }
 
@@ -278,7 +384,7 @@ void set_memory(maddress location, byte value) {
 	if (location < ramSize) {
 		ram[location] = value;
 	} else if (location >= romStart && !rom_locked) {
-		rom[location] = value;
+		rom[location - romStart] = value;
 	}
 }
 
@@ -288,8 +394,12 @@ byte get_memory(maddress location) {
 	if (location < ramSize) {
 		result = ram[location];
 	} else if (location >= romStart) {
-		result = rom[location];
+		result = rom[location - romStart];
 	}
 
 	return result;
+}
+
+void set_pc_register(maddress address) {
+	pc_reg = address;
 }

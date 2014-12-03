@@ -26,6 +26,7 @@ struct cpu_status
 	maddress pc;	
 	byte flags;
 	byte lastop;
+	byte lastcycles;
 	unsigned long totalcycles;
 };
 
@@ -35,7 +36,11 @@ extern void init_cpu(int RomSize, int RamSize);
 
 extern void start_cpu(void (*before)(struct cpu_status *), void (*after)(struct cpu_status *), struct cpu_status*);
 
+extern void step(void (*before)(struct cpu_status *), void (*after)(struct cpu_status *), struct cpu_status*);
+
 extern void get_cpu_status(struct cpu_status *cpustatus);
+
+extern void set_pc_register(maddress address);
 
 extern void lock_rom();
 
