@@ -314,10 +314,16 @@ void and_values(byte value) {
 	update_zero_and_negative_flags(accum_reg);
 }
 
+void eor_values(byte value) {
+	accum_reg = accum_reg ^ value;
+	update_zero_and_negative_flags(accum_reg);
+}
+
 int excute_instruction() {
 	cpu_fault_message[0] = '\0';
 	byte cycles = 0;
 	lastop = get_memory(pc_reg++);
+	maddress memarg;
 	signed char relative_diff;
 
 	switch (lastop) {
@@ -404,6 +410,10 @@ int excute_instruction() {
 			set_memory(get_indexed_indirect_arg(), accum_reg);
 			cycles = 6;
 			break;
+		case 0x91: // STA (indirect), y
+			set_memory(get_indirect_indexed_arg(), accum_reg);
+			cycles = 6;
+			break;
 		case 0x4c: // JMP absolute
 			pc_reg = get_absolute_arg();
 			cycles = 3;
@@ -416,6 +426,11 @@ int excute_instruction() {
 			push_address(pc_reg + 1);
 			pc_reg = get_absolute_arg();
 			cycles = 6;
+			break;
+		case 0xe6: // INC zero page
+			memarg = get_zero_page_arg();
+			set_memory(memarg, get_memory(memarg));
+			cycles = 5;
 			break;
 		case 0xe8: // INX impl
 			x_reg++;
@@ -485,6 +500,10 @@ int excute_instruction() {
 			compare_values(accum_reg, get_zero_page_value());
 			cycles = 3;
 			break;
+		case 0xd1: //CMP (indirect),y
+			compare_values(accum_reg, get_indirect_indexed_value());
+			cycles = 3;
+			break;
 		case 0x24: //BIT zero page
 			bit_values(accum_reg, get_zero_page_value());
 			cycles = 3;
@@ -500,6 +519,26 @@ int excute_instruction() {
 		case 0x00: //BRK implied
 			cycles = 7;
 			cpu_running = FALSE;
+			break;
+		case 0xaa: //TAX implied
+			x_reg = accum_reg;
+			cycles = 2;
+			break;
+		case 0x49: //EOR immediate
+			eor_values(get_immediate_value());
+			cycles = 2;
+			break;
+		case 0x08: //PHP implied
+			push_byte(flags_reg);
+			cycles = 3;
+			break;
+		case 0x28: // PLP implied
+			flags_reg = pop_byte();
+			cycles = 4;
+			break;
+		case 0x8a: // TXA implied
+			accum_reg = x_reg;
+			cycles = 2;
 			break;
 		default:
 			sprintf(cpu_fault_message, "Unimplemented op-code: %02x at %04x", lastop, --pc_reg);
