@@ -180,38 +180,95 @@ void update_zero_and_negative_flags(byte value) {
 	update_negative_flag(value);
 }
 
+byte get_immediate_value() {
+	return get_memory(pc_reg++);
+}
+
 maddress get_absolute_arg() {
-	return WORD_LOHI(get_memory(pc_reg + 1), get_memory(pc_reg + 2));
+	maddress result = WORD_LOHI(get_memory(pc_reg), get_memory(pc_reg + 1));
+	pc_reg += 2;
+	return result;
+}
+
+byte get_absolute_value() {
+	return get_memory(get_absolute_arg());
 }
 
 maddress get_absolute_x_arg() {
 	return get_absolute_arg() + x_reg;
 }
 
+byte get_absolute_x_value() {
+	return get_memory(get_absolute_x_arg());
+}
+
 maddress get_absolute_y_arg() {
 	return get_absolute_arg() + y_reg;
 }
 
-maddress get_indexed_indirect_arg() {
-	maddress result = WORD_LOHI(get_memory(pc_reg + 1) + x_reg, 0x00);
-	result = WORD_LOHI(get_memory(result), get_memory(result + 1));
-	return result;
+byte get_absolute_y_value() {
+	return get_memory(get_absolute_y_arg());
 }
 
 maddress get_zero_page_arg() {
-	return WORD_LOHI(get_memory(pc_reg + 1), 0x00);
+	return WORD_LOHI(get_memory(pc_reg++), 0x00);
+}
+
+byte get_zero_page_value() {
+	return get_memory(get_zero_page_arg());
 }
 
 maddress get_zero_page_x_arg() {
 	return get_zero_page_arg() + x_reg;
 }
 
+byte get_zero_page_x_value() {
+	return get_memory(get_zero_page_x_arg());
+}
+
 maddress get_zero_page_y_arg() {
 	return get_zero_page_arg() + y_reg;
 }
 
+byte get_zero_page_y_value() {
+	return get_memory(get_zero_page_y_arg());
+}
+
 signed char get_relative() {
-	return get_memory(pc_reg + 1);
+	return get_memory(pc_reg++);
+}
+
+maddress get_indirect_arg() {
+	maddress result = WORD_LOHI(get_memory(pc_reg++), 0x00);
+	result = WORD_LOHI(get_memory(result), get_memory(result + 1));
+	return result;
+}
+
+byte get_indirect_value() {
+	return get_memory(get_indirect_arg());
+}
+
+// (Ind,x)
+maddress get_indexed_indirect_arg() {
+	maddress result = WORD_LOHI(get_memory(pc_reg) + x_reg, 0x00);
+	pc_reg += 1;
+	result = WORD_LOHI(get_memory(result), get_memory(result + 1));
+	return result;
+}
+
+// (Ind,x)
+byte get_indexed_indirect_value() {
+	return get_memory(get_indexed_indirect_arg());
+}
+
+// (Ind),y
+maddress get_indirect_indexed_arg() {
+	return get_indirect_arg() + y_reg;
+}
+
+// (Ind),y
+byte get_indirect_indexed_value() {
+	return get_memory(get_indirect_indexed_arg());
 }
 
 void push_byte(byte value) {
@@ -260,95 +317,91 @@ void and_values(byte value) {
 int excute_instruction() {
 	cpu_fault_message[0] = '\0';
 	byte cycles = 0;
-	lastop = get_memory(pc_reg);
-	maddress memarg;
+	lastop = get_memory(pc_reg++);
+	signed char relative_diff;
 
 	switch (lastop) {
 		case 0xa9: // LDA immediate
-			accum_reg = get_memory(pc_reg + 1);
+			accum_reg = get_immediate_value();
 			update_zero_and_negative_flags(accum_reg);
-			pc_reg += 2;
 			cycles = 2;
 			break;
 		case 0xa5: // LDA zero page
-			memarg = get_zero_page_arg();
-			accum_reg = get_memory(memarg);
+			accum_reg = get_zero_page_value();
 			update_zero_and_negative_flags(accum_reg);
-			pc_reg += 2;
 			cycles = 3;
 			break;
 		case 0xbd: // LDA absolute,x
-			accum_reg = get_memory(get_absolute_x_arg());
+			accum_reg = get_absolute_x_value();
 			update_zero_and_negative_flags(accum_reg);
 			cycles = 4 + (pc_reg % 256 > 0 ? 1 : 0);
-			pc_reg += 3;
 			break;
 		case 0xb9: // LDA absolute,y
-			accum_reg = get_memory(get_absolute_y_arg());
+			accum_reg = get_absolute_y_value();
 			update_zero_and_negative_flags(accum_reg);
 			cycles = 4 + (pc_reg % 256 > 0 ? 1 : 0);
-			pc_reg += 3;
 			break;
 		case 0xad: // LDA absolute
-			accum_reg = get_memory(get_absolute_arg());
+			accum_reg = get_absolute_value();
 			update_zero_and_negative_flags(accum_reg);
 			cycles = 4;
-			pc_reg += 3;
+			break;
+		case 0xb1: // LDA (ind),y
+			accum_reg = get_indirect_indexed_value();
+			update_zero_and_negative_flags(accum_reg);
 			break;
 		case 0xa6: // LDX zero page
-			memarg = get_zero_page_arg();
-			x_reg = get_memory(memarg);
+			x_reg = get_zero_page_value();
 			update_zero_and_negative_flags(x_reg);
-			pc_reg += 2;
 			cycles = 3;
 			break;
 		case 0xa2: // LDX immediate
-			x_reg = get_memory(pc_reg + 1);
+			x_reg = get_immediate_value();
 			update_zero_and_negative_flags(x_reg);
-			pc_reg += 2;
 			cycles = 2;
 			break;
 		case 0xae: // LDX absolute
-			memarg = get_absolute_arg();
-			x_reg = get_memory(memarg);
+			x_reg = get_absolute_value();
 			update_zero_and_negative_flags(x_reg);
-			pc_reg += 3;
+			cycles = 4;
+			break;
+		case 0xa4: // LDY zero page
+			y_reg = get_zero_page_value();
+			update_zero_and_negative_flags(y_reg);
+			cycles = 3;
+			break;
+		case 0xa0: // LDY immediate
+			y_reg = get_immediate_value();
+			update_zero_and_negative_flags(y_reg);
+			cycles = 2;
+			break;
+		case 0xac: // LDY absolute
+			y_reg = get_absolute_value();
+			update_zero_and_negative_flags(y_reg);
 			cycles = 4;
 			break;
 		case 0x8d: // STA absolute
-			memarg = get_absolute_arg();
-			set_memory(memarg, accum_reg);
-			pc_reg += 3;
+			set_memory(get_absolute_arg(), accum_reg);
 			cycles = 4;
 			break;
 		case 0x9d: // STA absolute, x
-			memarg = get_absolute_x_arg();
-			set_memory(memarg, accum_reg);
-			pc_reg += 3;
+			set_memory(get_absolute_x_arg(), accum_reg);
 			cycles = 5;
 			break;
 		case 0x99: // STA absolute, y
-			memarg = get_absolute_y_arg();
-			set_memory(memarg, accum_reg);
-			pc_reg += 3;
+			set_memory(get_absolute_y_arg(), accum_reg);
 			cycles = 5;
 			break;
 		case 0x85: // STA zero page
-			memarg = get_zero_page_arg();
-			set_memory(memarg, accum_reg);
-			pc_reg += 2;
+			set_memory(get_zero_page_arg(), accum_reg);
 			cycles = 3;
 			break;
 		case 0x95: // STA zero page,x
-			memarg = get_zero_page_x_arg();
-			set_memory(memarg, accum_reg);
-			pc_reg += 2;
+			set_memory(get_zero_page_x_arg(), accum_reg);
 			cycles = 4;
 			break;
 		case 0x81: // STA (indirect, x)
-			memarg = get_indexed_indirect_arg();
-			set_memory(memarg, accum_reg);
-			pc_reg += 2;
+			set_memory(get_indexed_indirect_arg(), accum_reg);
 			cycles = 6;
 			break;
 		case 0x4c: // JMP absolute
@@ -360,111 +413,96 @@ int excute_instruction() {
 			cycles = 6;
 			break;
 		case 0x20: // JSR absolute
-			memarg = pc_reg + 2;
-			push_address(memarg);
+			push_address(pc_reg + 1);
 			pc_reg = get_absolute_arg();
 			cycles = 6;
 			break;
 		case 0xe8: // INX impl
 			x_reg++;
 			update_zero_and_negative_flags(x_reg);
-			pc_reg++;
 			cycles = 2;
 			break;
 		case 0xc8: // INY impl
 			y_reg++;
 			update_zero_and_negative_flags(y_reg);
-			pc_reg++;
 			cycles = 2;
 			break;
 		case 0xca: // DEX impl
 			x_reg--;
 			update_zero_and_negative_flags(x_reg);
-			pc_reg++;
 			cycles = 2;
 			break;
 		case 0x88: // DEY impl
 			y_reg--;
 			update_zero_and_negative_flags(y_reg);
-			pc_reg++;
 			cycles = 2;
 			break;
 		case 0xf0: //BEQ relative
+			relative_diff = get_relative();
 			if (get_zero_flag()) {
-				signed char diff = get_relative();
 				byte currpage = pc_reg >> 8;
-				pc_reg += diff + 2;
+				pc_reg += relative_diff;
 				cycles = 3 + ( currpage != pc_reg >> 8 ? 1 : 0);
 			} else {
-				pc_reg += 2;
 				cycles = 2;
 			}
 			break;
 		case 0xd0: //BNE relative
+			relative_diff = get_relative();
 			if (!get_zero_flag()) {
-				signed char diff = get_relative();
 				byte currpage = pc_reg >> 8;
-				pc_reg += diff + 2;
+				pc_reg += relative_diff;
 				cycles = 3 + ( currpage != pc_reg >> 8 ? 1 : 0);
 			} else {
-				pc_reg += 2;
 				cycles = 2;
 			}
 			break;
 		case 0x10: //BPL relative
+			relative_diff = get_relative();
 			if (!get_negative_flag()) {
-				signed char diff = get_relative();
 				byte currpage = pc_reg >> 8;
-				pc_reg += diff + 2;
+				pc_reg += relative_diff;
 				cycles = 3 + ( currpage != pc_reg >> 8 ? 1 : 0);
 			} else {
-				pc_reg += 2;
 				cycles = 2;
 			}
 			break;
 		case 0x30: //BMI relative
+			relative_diff = get_relative();
 			if (get_negative_flag()) {
-				signed char diff = get_relative();
 				byte currpage = pc_reg >> 8;
-				pc_reg += diff + 2;
+				pc_reg += relative_diff;
 				cycles = 3 + ( currpage != pc_reg >> 8 ? 1 : 0);
 			} else {
-				pc_reg += 2;
 				cycles = 2;
 			}
 			break;
 		case 0xc9: //CMP immediate
-			compare_values(accum_reg, get_memory(pc_reg + 1));
-			pc_reg += 2;
+			compare_values(accum_reg, get_immediate_value());
 			cycles = 2;
 			break;
 		case 0xc5: //CMP zero page
-			compare_values(accum_reg, get_memory(get_zero_page_arg()));
-			pc_reg += 2;
+			compare_values(accum_reg, get_zero_page_value());
 			cycles = 3;
 			break;
 		case 0x24: //BIT zero page
-			bit_values(accum_reg, get_memory(get_zero_page_arg()));
-			pc_reg += 2;
+			bit_values(accum_reg, get_zero_page_value());
 			cycles = 3;
 			break;
 		case 0x2c: //BIT absolute
-			bit_values(accum_reg, get_memory(get_absolute_arg()));
-			pc_reg += 3;
+			bit_values(accum_reg, get_absolute_value());
 			cycles = 4;
 			break;
 		case 0x29: //AND immediate
-			and_values(get_memory(pc_reg + 1));
-			pc_reg += 2;
+			and_values(get_immediate_value());
 			cycles = 2;
 			break;
 		case 0x00: //BRK implied
-			pc_reg += 1;
 			cycles = 7;
 			cpu_running = FALSE;
 			break;
 		default:
-			sprintf(cpu_fault_message, "Unimplemented op-code: %02x at %04x", lastop, pc_reg);
+			sprintf(cpu_fault_message, "Unimplemented op-code: %02x at %04x", lastop, --pc_reg);
 			cpu_running = FALSE;
 			break;
 	}

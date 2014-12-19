@@ -3,3 +3,4 @@
 h6502
 *.bin
 *.prg
+.DS_Store
