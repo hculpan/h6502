@@ -429,7 +429,7 @@ int excute_instruction() {
 			break;
 		case 0xe6: // INC zero page
 			memarg = get_zero_page_arg();
-			set_memory(memarg, get_memory(memarg));
+			set_memory(memarg, get_memory(memarg) + 1);
 			cycles = 5;
 			break;
 		case 0xe8: // INX impl

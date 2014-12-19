@@ -1,46 +1,26 @@
 *=$e000
 
-start:
-	ldx #$00
-
-write_msg:
-	jsr RCCHR
-	cmp #$71		; check for 'q'
-	beq end
-	jsr SNDCHR
-	jmp write_msg
-	
-SNDCHR   sta $FE                    ; Save the character to be printed
-         cmp #$FF                   ; Check for a bunch of characters
-         BEQ EXSC                   ; that we don't want to print to
-         cmp #$00                   ; the terminal and discard them to
-         beq EXSC                   ; clean up the output
-         cmp #$91                   ;
-         beq EXSC                   ;
-         cmp #$93                   ;
-         beq EXSC                   ;
-         cmp #$80                   ;
-         beq EXSC                   ;
-         cmp #$0A                   ; Ignore line feed
-         beq EXSC                   ;
-
-GETSTS   bit $D012                  ; bit (B7) cleared yet?
-         bmi GETSTS                 ; No, wait for display.
-         lda $FE                    ; Restore the character
-         sta $D012                  ; Output character.
-EXSC     rts                        ; Return
-
-RCCHR    lda $D011                  ; Keyboard CR
-         bpl RCCHR
-         lda $D010                  ; Keyboard data
-         and #%01111111             ; Clear high bit to be valid ASCII
-         rts
-
-end:
-	brk
-
-msg:
-	.text "HELLO, WORLD!"
-	.byte $0d,$00
-;	.byte $0a
-;	.byte $00
+START:
+         ldy #$01                   ; Load register Y with $01
+MEM_T    lda ($22),Y                ; Load accumulator With the contents of a byte of memory
+         tax                        ; Save it to X
+         eor #$FF                   ; Next 4 instuctions test to see if this memory location
+         sta ($22),Y                ; is ram by trying to write something new to it - new value
+         cmp ($22),Y                ; gets created by XORing the old value with $FF - store the
+         php                        ; result of the test on the stack to look at later
+         txa                        ; Retrieve the old memory value
+         sta ($22),Y                ; Put it back where it came from
+         inc $22                    ; Increment $22 (for next memory location)
+         bne SKP_PI                 ; Skip if we don't need to increment page
+         inc $23                    ; Increment $23 (for next memory page)
+SKP_PI   lda $23                    ; Get high byte of memory address
+         cmp #>START                ; Did we reach start address of Tiny Basic?
+         bne PULL                   ; Branch if not
+         lda $22                    ; Get low byte of memory address
+         cmp #<START                ; Did we reach start address of Tiny Basic?
+         beq TOP                    ; If so, stop memory test so we don't overwrite ourselves
+PULL  
+         plp                        ; Now look at the result of the memory test
+         beq MEM_T                  ; Go test the next memory location if the last one was ram
+TOP
+         dey                        ; If last memory location did not test as ram, decrement Y (should be $00 now)
