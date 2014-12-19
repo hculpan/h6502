@@ -15,7 +15,9 @@
 #define HIBYTE(x) (byte)(x >> 8)
 
 #define Z_SET(x) (x & 0b00000010)
-#define N_SET(x) (x & 0b01000000)
+#define N_SET(x) (x & 0b10000000)
+#define C_SET(x) (x & 0b00000001)
+#define V_SET(x) (x & 0b01000000)
 
 struct cpu_status
 {
@@ -28,15 +30,18 @@ struct cpu_status
 	byte lastop;
 	byte lastcycles;
 	unsigned long totalcycles;
+	char message[100];
 };
 
 #define WORD_LOHI(lo, hi) (maddress)((hi << 8) + lo)
 
+#define WORD_HILO(hi, lo) (maddress)((hi << 8) + lo)
+
 extern void init_cpu(int RomSize, int RamSize);
 
-extern void start_cpu(void (*before)(struct cpu_status *), void (*after)(struct cpu_status *), struct cpu_status*);
+extern void start_cpu(void (*after)(struct cpu_status *), void (*fault)(struct cpu_status *), struct cpu_status*);
 
-extern void step(void (*before)(struct cpu_status *), void (*after)(struct cpu_status *), struct cpu_status*);
+extern void step(void (*after)(struct cpu_status *), void (*fault)(struct cpu_status *), struct cpu_status*);
 
 extern void get_cpu_status(struct cpu_status *cpustatus);
 

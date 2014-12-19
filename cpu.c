@@ -1,6 +1,10 @@
 #include "cpu.h"
 
 #include <stdio.h>
+#include <string.h>
+#include <termios.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 int romSize;
 int ramSize;
@@ -15,7 +19,7 @@ byte rom_locked = FALSE;
 byte accum_reg = 0;
 byte x_reg = 0;
 byte y_reg = 0;
-byte flags_reg = 0;
+byte flags_reg = 0b00100000;
 
 maddress stack_start = 0x0100;
 byte sp_reg = 0x00;
@@ -29,6 +33,8 @@ byte lastop = 0;
 byte lastcycles = 0;
 
 unsigned long totalcycles = 0;
+
+char cpu_fault_message[100];
 
 byte * init_memory(int size) {
 	byte *result = malloc(size);
@@ -98,10 +104,39 @@ void get_cpu_status(struct cpu_status *cpustatus) {
 	cpustatus->lastop = lastop;
 	cpustatus->lastcycles = lastcycles;
 	cpustatus->totalcycles = totalcycles;
+	strcpy(cpustatus->message, cpu_fault_message);
+}
+
+void set_overflow_flag() {
+	flags_reg |= 0b01000000;
+}
+
+byte get_overflow_flag() {
+	return V_SET(flags_reg);
+}
+
+void clear_overflow_flag() {
+	flags_reg &= 0b10111111;
+}
+
+void update_overflow_flag(byte value) {
+	flags_reg |= (0b01000000 & value);
+}
+
+void set_carry_flag() {
+	flags_reg |= 0b00000001;
+}
+
+byte get_carry_flag() {
+	return C_SET(flags_reg);
+}
+
+void clear_carry_flag() {
+	flags_reg &= 0b11111110;
 }
 
 void set_negative_flag() {
-	flags_reg |= 0b01000000;
+	flags_reg |= 0b10000000;
 }
 
 byte get_negative_flag() {
@@ -109,7 +144,7 @@ byte get_negative_flag() {
 }
 
 void clear_negative_flag() {
-	flags_reg &= 0b10111111;
+	flags_reg &= 0b01111111;
 }
 
 void set_zero_flag() {
@@ -154,7 +189,7 @@ maddress get_absolute_x_arg() {
 }
 
 maddress get_absolute_y_arg() {
-	return get_absolute_arg() + x_reg;
+	return get_absolute_arg() + y_reg;
 }
 
 maddress get_indexed_indirect_arg() {
@@ -179,7 +214,51 @@ signed char get_relative() {
 	return get_memory(pc_reg + 1);
 }
 
+void push_byte(byte value) {
+	set_memory(sp_reg + 256, value);
+	sp_reg--;
+}
+
+byte pop_byte() {
+	sp_reg++;
+	byte result = get_memory(sp_reg + 256);
+	return result;
+}
+
+void push_address(maddress value) {
+	push_byte(HIBYTE(value));
+	push_byte(LOBYTE(value));
+}
+
+maddress pop_address() {
+	byte lo = pop_byte();
+	byte hi = pop_byte();
+	return WORD_LOHI(lo, hi);
+}
+
+void compare_values(byte reg, byte value) {
+	update_negative_flag(reg - value);
+	update_zero_flag(reg - value);
+	if (reg >= value) {
+		set_carry_flag();
+	} else {
+		clear_carry_flag();
+	}
+}
+
+void bit_values(byte reg, byte value) {
+	update_negative_flag(reg & value);
+	update_zero_flag(reg & value);
+	update_overflow_flag(reg & value);
+}
+
+void and_values(byte value) {
+	accum_reg = accum_reg & value;
+	update_zero_and_negative_flags(accum_reg);
+}
+
 int excute_instruction() {
+	cpu_fault_message[0] = '\0';
 	byte cycles = 0;
 	lastop = get_memory(pc_reg);
 	maddress memarg;
@@ -190,6 +269,31 @@ int excute_instruction() {
 			update_zero_and_negative_flags(accum_reg);
 			pc_reg += 2;
 			cycles = 2;
+			break;
+		case 0xa5: // LDA zero page
+			memarg = get_zero_page_arg();
+			accum_reg = get_memory(memarg);
+			update_zero_and_negative_flags(accum_reg);
+			pc_reg += 2;
+			cycles = 3;
+			break;
+		case 0xbd: // LDA absolute,x
+			accum_reg = get_memory(get_absolute_x_arg());
+			update_zero_and_negative_flags(accum_reg);
+			cycles = 4 + (pc_reg % 256 > 0 ? 1 : 0);
+			pc_reg += 3;
+			break;
+		case 0xb9: // LDA absolute,y
+			accum_reg = get_memory(get_absolute_y_arg());
+			update_zero_and_negative_flags(accum_reg);
+			cycles = 4 + (pc_reg % 256 > 0 ? 1 : 0);
+			pc_reg += 3;
+			break;
+		case 0xad: // LDA absolute
+			accum_reg = get_memory(get_absolute_arg());
+			update_zero_and_negative_flags(accum_reg);
+			cycles = 4;
+			pc_reg += 3;
 			break;
 		case 0xa6: // LDX zero page
 			memarg = get_zero_page_arg();
@@ -251,6 +355,16 @@ int excute_instruction() {
 			pc_reg = get_absolute_arg();
 			cycles = 3;
 			break;
+		case 0x60: // RTS implied
+			pc_reg = pop_address() + 1;
+			cycles = 6;
+			break;
+		case 0x20: // JSR absolute
+			memarg = pc_reg + 2;
+			push_address(memarg);
+			pc_reg = get_absolute_arg();
+			cycles = 6;
+			break;
 		case 0xe8: // INX impl
 			x_reg++;
 			update_zero_and_negative_flags(x_reg);
@@ -308,7 +422,7 @@ int excute_instruction() {
 				cycles = 2;
 			}
 			break;
-		case 0x30: //BPMI relative
+		case 0x30: //BMI relative
 			if (get_negative_flag()) {
 				signed char diff = get_relative();
 				byte currpage = pc_reg >> 8;
@@ -319,8 +433,38 @@ int excute_instruction() {
 				cycles = 2;
 			}
 			break;
-		default:
+		case 0xc9: //CMP immediate
+			compare_values(accum_reg, get_memory(pc_reg + 1));
+			pc_reg += 2;
+			cycles = 2;
+			break;
+		case 0xc5: //CMP zero page
+			compare_values(accum_reg, get_memory(get_zero_page_arg()));
+			pc_reg += 2;
+			cycles = 3;
+			break;
+		case 0x24: //BIT zero page
+			bit_values(accum_reg, get_memory(get_zero_page_arg()));
+			pc_reg += 2;
+			cycles = 3;
+			break;
+		case 0x2c: //BIT absolute
+			bit_values(accum_reg, get_memory(get_absolute_arg()));
+			pc_reg += 3;
+			cycles = 4;
+			break;
+		case 0x29: //AND immediate
+			and_values(get_memory(pc_reg + 1));
+			pc_reg += 2;
+			cycles = 2;
+			break;
+		case 0x00: //BRK implied
 			pc_reg += 1;
+			cycles = 7;
+			cpu_running = FALSE;
+			break;
+		default:
+			sprintf(cpu_fault_message, "Unimplemented op-code: %02x at %04x", lastop, pc_reg);
 			cpu_running = FALSE;
 			break;
 	}
@@ -328,27 +472,26 @@ int excute_instruction() {
 	return cycles;
 }
 
-void step(void (*before)(struct cpu_status *), void (*after)(struct cpu_status *), struct cpu_status *cpustatus) {
-	if (before) {
-		get_cpu_status(cpustatus);
-		before(cpustatus);
-	}
-
+void step(void (*after)(struct cpu_status *), void (*fault)(struct cpu_status *), struct cpu_status *cpustatus) {
 	lastcycles = excute_instruction();
 	totalcycles += lastcycles;
 
-	if (after) {
+	if (fault && cpu_fault_message[0] != '\0') {
+		get_cpu_status(cpustatus);
+		fault(cpustatus);
+		cpu_running = FALSE;
+	} else if (after) {
 		get_cpu_status(cpustatus);
 		after(cpustatus);
 	}
 }
 
-void start_cpu(void (*before)(struct cpu_status *), void (*after)(struct cpu_status *), struct cpu_status *cpustatus) {
+void start_cpu(void (*after)(struct cpu_status *), void (*fault)(struct cpu_status *), struct cpu_status *cpustatus) {
 	totalcycles = 0;
 	cpu_running = TRUE;
 
 	while (cpu_running) {
-		step(before, after, cpustatus);
+		step(after, fault, cpustatus);
 	}
 }
 
@@ -381,17 +524,58 @@ maddress rom_start() {
 }
 
 void set_memory(maddress location, byte value) {
-	if (location < ramSize) {
+	if (location == 0xd012) { // send char to output
+		if (value == 0x0d) {
+			printf("\n");
+		} else {
+			printf("%c", value);
+		}
+		ram[location] = value & 0b10111111;
+	} else if (location < ramSize) {
 		ram[location] = value;
 	} else if (location >= romStart && !rom_locked) {
 		rom[location - romStart] = value;
 	}
 }
 
+int kbhit(void) {
+  struct termios oldt, newt;
+  int ch;
+  int oldf;
+
+  tcgetattr(STDIN_FILENO, &oldt);
+  newt = oldt;
+  newt.c_lflag &= ~(ICANON | ECHO);
+  tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+  oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
+  fcntl(STDIN_FILENO, F_SETFL, oldf | O_NONBLOCK);
+
+  ch = getchar();
+
+  tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+  fcntl(STDIN_FILENO, F_SETFL, oldf);
+
+  if(ch != EOF) {
+    ungetc(ch, stdin);
+    return 1;
+  }
+
+  return 0;
+}
+
 byte get_memory(maddress location) {
 	byte result = 0;
 
-	if (location < ramSize) {
+	if (location == 0xd011) { // check keyboard status
+		if (kbhit() == 0) {
+			return 0;
+		} else {
+			byte c = LOBYTE(getchar());
+			set_memory(0xd010, (c == 0x0a ? 0x0d : c));
+			return 0xff;
+		}
+		return 0;
+	} else if (location < ramSize) {
 		result = ram[location];
 	} else if (location >= romStart) {
 		result = rom[location - romStart];
@@ -403,3 +587,4 @@ byte get_memory(maddress location) {
 void set_pc_register(maddress address) {
 	pc_reg = address;
 }
+

@@ -23,8 +23,8 @@ void display_cpu_status(struct cpu_status *cpustatus) {
 		test = test << 1;
 	}
 
-	printf("  PC   AC  XR  YR  SP  NV-BDIZC  PC    OP       PC+1 PC+2\n");
-	printf(" %04x  %02x  %02x  %02x  %02x  %s  %04x  %02x (%s)  %02x   %02x\n\n",
+	printf("  PC   AC  XR  YR  SP  NV-BDIZC  PC    OP              PC+1 PC+2\n");
+	printf(" %04x  %02x  %02x  %02x  %02x  %s  %04x  %02x (%s %s)  \t%02x   %02x\n\n",
 		cpustatus->pc,
 		cpustatus->a,
 		cpustatus->x,
@@ -34,9 +34,15 @@ void display_cpu_status(struct cpu_status *cpustatus) {
 		cpustatus->pc,
 		get_memory(cpustatus->pc),
 		inst_mneumonics[get_memory(cpustatus->pc)],
+		inst_addressing[get_memory(cpustatus->pc)],
 		get_memory(cpustatus->pc + 1),
 		get_memory(cpustatus->pc + 2)
 		);
+}
+
+void cpu_fault(struct cpu_status *cpustatus) {
+	printf("FAULT: %s\n", cpustatus->message);
+	display_cpu_status(cpustatus);
 }
 
 void cpu_status_callback(struct cpu_status *cpustatus) {
@@ -60,11 +66,63 @@ void mem_display() {
 	monitor_current_address += 16 * 8;
 }
 
+byte get_size_of_param(byte instr) {
+	const char *addr_mode = inst_addressing[instr];
+	if (strcmp(IMP, addr_mode) == 0 || strcmp(ACC, addr_mode) == 0 || addr_mode[0] == 'N') {
+		return 0;
+	} else if (addr_mode[0] == 'I' || addr_mode[0] == 'Z' || addr_mode[0] == 'R') {
+		return 1;
+	} else {
+		return 2;
+	}
+}
+
+maddress disassemble(maddress address) {
+	byte instr = get_memory(address);
+	byte param_size = get_size_of_param(instr);
+	if (param_size == 0) {
+		printf("   %04x\t%02x\t\t: %s\n", address, instr, inst_mneumonics[instr]);
+	} else if (param_size == 1 && strcmp(IMM, inst_addressing[instr]) == 0) {
+		printf("   %04x\t%02x %02x\t\t: %s\t#$%02x\n", address, instr, get_memory(address + 1), inst_mneumonics[instr], get_memory(address + 1));
+	} else if (param_size == 1 && strcmp(INDX, inst_addressing[instr]) == 0) {
+		printf("   %04x\t%02x %02x\t\t: %s\t($%02x,x)\n", address, instr, get_memory(address + 1), inst_mneumonics[instr], get_memory(address + 1));
+	} else if (param_size == 1 && strcmp(INDY, inst_addressing[instr]) == 0) {
+		printf("   %04x\t%02x %02x\t\t: %s\t($%02x),y\n", address, instr, get_memory(address + 1), inst_mneumonics[instr], get_memory(address + 1));
+	} else if (param_size == 1 && strcmp(ZPX, inst_addressing[instr]) == 0) {
+		printf("   %04x\t%02x %02x\t\t: %s\t$%02x,x\n", address, instr, get_memory(address + 1), inst_mneumonics[instr], get_memory(address + 1));
+	} else if (param_size == 1 && strcmp(ZPX, inst_addressing[instr]) == 0) {
+		printf("   %04x\t%02x %02x\t\t: %s\t$%02x,y\n", address, instr, get_memory(address + 1), inst_mneumonics[instr], get_memory(address + 1));
+	} else if (param_size == 1) {
+		printf("   %04x\t%02x %02x\t\t: %s\t$%02x\n", address, instr, get_memory(address + 1), inst_mneumonics[instr], get_memory(address + 1));
+	} else if (strcmp(ABX, inst_addressing[instr]) == 0) {
+		printf("   %04x\t%02x %02x %02x\t: %s\t$%04x,x\n", address, instr, 
+			get_memory(address + 1), get_memory(address + 2), 
+			inst_mneumonics[instr], 
+			WORD_LOHI(get_memory(address + 1), get_memory(address + 2))
+			);
+	} else if (strcmp(ABY, inst_addressing[instr]) == 0) {
+		printf("   %04x\t%02x %02x %02x\t: %s\t$%04x,y\n", address, instr, 
+			get_memory(address + 1), get_memory(address + 2), 
+			inst_mneumonics[instr], 
+			WORD_LOHI(get_memory(address + 1), get_memory(address + 2))
+			);
+	} else {
+		printf("   %04x\t%02x %02x %02x\t: %s\t$%04x\n", address, instr, 
+			get_memory(address + 1), get_memory(address + 2), 
+			inst_mneumonics[instr], 
+			WORD_LOHI(get_memory(address + 1), get_memory(address + 2))
+			);
+	}
+
+	return param_size + 1;
+}
+
 byte parse_command(char *cmd) {
 	byte result = FALSE;
-	char *c, *d, *lasts;
-	c = strtok_r(cmd, " ", &lasts);
-	d = strtok_r(NULL, " ", &lasts);
+	char *c, *d, *e, *lasts;
+	c = strtok_r(cmd, "[ ,]", &lasts);
+	d = strtok_r(NULL, "[ ,]", &lasts);
+	e = strtok_r(NULL, "[ ,]", &lasts);
 	if ((strcmp("m", c) == 0 || strcmp("mem", c) == 0) && !d) {
 		mem_display();
 	} else if (strcmp("m", c) == 0 || strcmp("mem", c) == 0) {
@@ -76,13 +134,31 @@ byte parse_command(char *cmd) {
 	} else if (strcmp("out", c) == 0) {
 		output_exec_steps = !output_exec_steps;
 		printf("OUTPUT=%d\n", output_exec_steps);
+	} else if (strcmp("p", c) == 0 || strcmp("put", c) == 0) {
+		if (!d || !e) {
+			printf("Required parameters not found\n");
+		} else {
+			char *p;
+			long address = strtol(d, &p, 16);
+			unsigned short value = (unsigned short)strtoul(e, &p, 16);
+			set_memory(address, value);
+		}
+	} else if (strcmp("d", c) == 0 || strcmp("dis", c) == 0) {
+		maddress address = monitor_current_address;
+		if (d) {
+			char *p;
+			address = strtol(d, &p, 16);
+		}
+		for (int i = 0; i < 20; i++) {
+			address += disassemble(address);
+		}
 	} else if (strcmp("s", c) == 0 || strcmp("step", c) == 0) {
 		if (d) {
 			char *p;
 			set_pc_register(strtol(d, &p, 16));
 		}
 		struct cpu_status *cpustatus = malloc(sizeof(struct cpu_status));
-		step(0, &cpu_status_callback, cpustatus);
+		step(&cpu_status_callback, &cpu_fault, cpustatus);
 		free(cpustatus);
 	} else if (strcmp("start", c) == 0) {
 		if (d) {
@@ -90,7 +166,7 @@ byte parse_command(char *cmd) {
 			set_pc_register(strtol(d, &p, 16));
 		}
 		struct cpu_status *cpustatus = malloc(sizeof(struct cpu_status));
-		start_cpu(0, &cpu_status_callback, cpustatus);
+		start_cpu(&cpu_status_callback, &cpu_fault, cpustatus);
 		free(cpustatus);
 	} else if (strcmp("r", c) == 0 || strcmp("reg", c) == 0) {
 		struct cpu_status *cpustatus = malloc(sizeof(struct cpu_status));
@@ -98,8 +174,10 @@ byte parse_command(char *cmd) {
 		display_cpu_status(cpustatus);
 		free(cpustatus);
 	} else if (strcmp("h", c) == 0 || strcmp("help", c) == 0) {
+		printf("  d, dis [address]\tDisassemble\n");
 		printf("  m, mem [address]\tMemory dump\n");
 		printf("  out\t\t\tToggle display of registers at each execution step\n");
+		printf("  p, put address,value\tPut the value at address\n");
 		printf("  r, reg\t\tDisplay cpu registers\n");
 		printf("  s, step [address]\tExecute address as single step\n");
 		printf("  start [address]\tStart execution at current PC register\n");
