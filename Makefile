@@ -1,6 +1,6 @@
 CC=gcc
 RM=rm
-ASM_HOME?=C:/Users/usucuha/64tass-1.51.774/64tass.exe
+ASM_HOME?=/Users/harryculpan/Dropbox/RetroComputing/dev/64tass-os-x/64tass
 CFLAGS=-std=c99 -Wall -Ofast -I .
 
 all: h6502
@@ -16,12 +16,17 @@ test: test.o
 
 clean:
 	$(RM) -f *.o
+	$(RM) -f *.stackdump
 	$(RM) -f *.bin
+	$(RM) -f *.zip
 	$(RM) -f h6502.exe
 	$(RM) -f h6502
 
 rom:
-	$(ASM_HOME) -b -o rom.bin test/rom.asm
+	$(ASM_HOME) -b -o rom.bin rom/rom.asm
+
+zip: clean
+	zip -r9 h6502.zip *
 
 tinybasic:
-	$(ASM_HOME) -b -o rom.bin test/tinybasic.asm
+	$(ASM_HOME) -b -o rom.bin rom/tinybasic.asm

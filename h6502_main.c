@@ -117,6 +117,28 @@ maddress disassemble(maddress address) {
 	return param_size + 1;
 }
 
+void display_memory_map() {
+	mem_segment* curr_segment = get_first_memory_segment();
+	char seg_name[10];
+	while (curr_segment) {
+		if (curr_segment->segment_type == 0) {
+			strcpy(seg_name, "RAM");
+		} else if (curr_segment->segment_type == 1) {
+			strcpy(seg_name, "ROM");
+		} else if (curr_segment->segment_type == 2) {
+			strcpy(seg_name, "DMA");
+		} else {
+			strcpy(seg_name, "UKN");
+		}
+		printf("%10s: %04x-%04x\t\tsize=%02dk\n",
+			seg_name,
+			curr_segment->start,
+			curr_segment->end,
+			(int)((curr_segment->end - curr_segment->start + 1)/1024));
+		curr_segment = curr_segment->next_segment;
+	}
+}
+
 byte parse_command(char *cmd) {
 	byte result = FALSE;
 	char *c, *d, *e, *lasts;
@@ -160,6 +182,16 @@ byte parse_command(char *cmd) {
 		struct cpu_status *cpustatus = malloc(sizeof(struct cpu_status));
 		step(&cpu_status_callback, &cpu_fault, cpustatus);
 		free(cpustatus);
+	} else if (strcmp("b", c) == 0 || strcmp("bin", c) == 0) {
+		if (d) {
+			char *p;
+			set_pc_register(strtol(d, &p, 16));
+		}
+		struct cpu_status *cpustatus = malloc(sizeof(struct cpu_status));
+		step(&cpu_status_callback, &cpu_fault, cpustatus);
+		free(cpustatus);
+	} else if (strcmp("map", c) == 0) {
+		display_memory_map();
 	} else if (strcmp("start", c) == 0) {
 		if (d) {
 			char *p;
@@ -174,14 +206,17 @@ byte parse_command(char *cmd) {
 		display_cpu_status(cpustatus);
 		free(cpustatus);
 	} else if (strcmp("h", c) == 0 || strcmp("help", c) == 0) {
-		printf("  d, dis [address]\tDisassemble\n");
-		printf("  m, mem [address]\tMemory dump\n");
-		printf("  out\t\t\tToggle display of registers at each execution step\n");
-		printf("  p, put address,value\tPut the value at address\n");
-		printf("  r, reg\t\tDisplay cpu registers\n");
-		printf("  s, step [address]\tExecute address as single step\n");
-		printf("  start [address]\tStart execution at current PC register\n");
-		printf("  q, quit\t\tExit simulator\n");
+		printf("  b, bin [name],[address]\tLoad binary file\n");
+		printf("  d, dis [address]\t\tDisassemble\n");
+		printf("  l, load [name],[address]\tLoad file\n");
+		printf("  m, mem [address]\t\tMemory dump\n");
+		printf("  map\t\t\t\tDisplay memory map\n");
+		printf("  out\t\t\t\tToggle display at each execution step\n");
+		printf("  p, put [address],[value]\tPut the value at address\n");
+		printf("  r, reg\t\t\tDisplay cpu registers\n");
+		printf("  s, step [address]\t\tExecute address as single step\n");
+		printf("  start [address]\t\tStart execution at current PC register\n");
+		printf("  q, quit\t\t\tExit simulator\n");
 	} else {
 		printf("Unrecognized command: '%s'\n", cmd);
 	}
@@ -201,13 +236,17 @@ void monitor_command() {
 		}
    		quitting = parse_command(cmd);
 	}
-//	start_cpu(0, &after_current_op, cpustatus);
 }
 
 int main(int argc, char *argv[]) {
 	printf("H6502 Emulator\n");
+
+	mem_segment *first = create_mem_segment(SEGMENT_TYPE_RAM, 0, 0xcfff, NULL);
+	mem_segment *next = create_mem_segment(SEGMENT_TYPE_DMA, 0xd000, 0xdfff, first);
+	next = create_mem_segment(SEGMENT_TYPE_ROM, 0xe000, 0xffff, next);
+
 	printf("Initializing...\n");
-	init_cpu(ROM_SIZE, RAM_SIZE);
+	init_cpu(first);
 	printf("System ready\n");
 	printf("%d bytes ROM, %d bytes RAM available\n", rom_size(), ram_size());
 	monitor_command();

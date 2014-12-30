@@ -1297,7 +1297,6 @@ RCCHR    lda $D011                  ; Keyboard CR
          bpl RCCHR
          lda $D010                  ; Keyboard data
          and #%01111111             ; Clear high bit to be valid ASCII
-         rts
 
 ;
 ; Send a character to the screen
@@ -1313,8 +1312,8 @@ SNDCHR   sta $FE                    ; Save the character to be printed
          beq EXSC                   ;
          cmp #$80                   ;
          beq EXSC                   ;
-         cmp #$0A                   ; Ignore line feed
-         beq EXSC                   ;
+;         cmp #$0A                   ; Ignore line feed
+;         beq EXSC                   ;
 
 GETSTS   bit $D012                  ; bit (B7) cleared yet?
          bmi GETSTS                 ; No, wait for display.
